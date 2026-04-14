@@ -234,4 +234,4 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 ## Credits
 
-Built by [Saskia Lund](https://github.com/s-a-s-k-i-a). Developed for real-world use at [Tierheim Hannover](https://www.tierheim-hannover.de/).
+Built by [Saskia Teichmann](https://github.com/s-a-s-k-i-a). Developed for real-world use at [Tierheim Hannover](https://www.tierheim-hannover.de/).
