@@ -98,8 +98,7 @@
               </div>
             {% else %}
               <p class="text-muted">{% trans %}No DKIM key has been generated for this domain yet.{% endtrans %}</p>
-              <form method="post" action="{{ path('clp_site_mail_generate_dkim', {'domainName': site.domainName}) }}">
-                <input type="hidden" name="token" value="{{ csrf_token('generate-dkim') }}">
+              <form method="post" action="{{ path('clp_site_mail_generate_dkim', {'domainName': site.domainName}) }}?token={{ csrf_token('generate-dkim') }}">
                 <button type="submit" class="btn btn-blue">
                   {% trans %}Generate DKIM Key{% endtrans %}
                 </button>
@@ -174,15 +173,24 @@
       btn.prop('disabled', true);
       spinner.removeClass('d-none');
 
-      jQuery.getJSON("{{ path('clp_site_mail_verify_dns', {'domainName': '__DOMAIN__'}) }}".replace('__DOMAIN__', domain), function(data) {
-        var statusMap = {true: '<span class="badge bg-success">{% trans %}Active{% endtrans %}</span>', false: '<span class="badge bg-danger">{% trans %}Missing{% endtrans %}</span>'};
-        jQuery('#status-spf').html(statusMap[data.spf]);
-        jQuery('#status-dkim').html(statusMap[data.dkim]);
-        jQuery('#status-dmarc').html(statusMap[data.dmarc]);
-      }).always(function() {
-        btn.prop('disabled', false);
-        spinner.addClass('d-none');
-      });
+      jQuery.getJSON("{{ path('clp_site_mail_verify_dns', {'domainName': '__DOMAIN__'}) }}".replace('__DOMAIN__', domain))
+        .done(function(data) {
+          var active = '<span class="badge bg-success">{% trans %}Active{% endtrans %}</span>';
+          var missing = '<span class="badge bg-danger">{% trans %}Missing{% endtrans %}</span>';
+          jQuery('#status-spf').html(data.spf ? active : missing);
+          jQuery('#status-dkim').html(data.dkim ? active : missing);
+          jQuery('#status-dmarc').html(data.dmarc ? active : missing);
+        })
+        .fail(function(jqXHR) {
+          var error = '<span class="badge bg-warning">{% trans %}Error{% endtrans %}</span>';
+          jQuery('#status-spf').html(error);
+          jQuery('#status-dkim').html(error);
+          jQuery('#status-dmarc').html(error);
+        })
+        .always(function() {
+          btn.prop('disabled', false);
+          spinner.addClass('d-none');
+        });
     });
   });
   </script>
