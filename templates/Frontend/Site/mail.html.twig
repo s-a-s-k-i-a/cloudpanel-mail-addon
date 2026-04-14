@@ -1,0 +1,189 @@
+{% extends 'Frontend/layout.html.twig' %}
+
+{% block pageTitle %}{% trans %}Mail Setup{% endtrans %}{% endblock %}
+
+{%- block stylesheets -%}
+  {{ parent() }}
+  <link href="{{ asset('/assets/css/frontend/site.css') }}" rel="stylesheet">
+  <link href="{{ asset('/assets/css/frontend/mail.css') }}" rel="stylesheet">
+{% endblock %}
+
+{% block body %}
+<div class="container-fluid container-limited-width">
+  <div class="site-container">
+    {{ include('Frontend/Site/Partial/site-info.html.twig', {'site': site}) }}
+    <div class="site-content-container">
+      {{ include('Frontend/Site/Partial/tab-container.html.twig', {'active': 'mail', 'site': site}) }}
+      {{ include('Partial/flash-messages.html.twig', { 'flashBagMessages': app.session.flashbag.all }) }}
+      <div class="site-content">
+
+        {# DNS Status Overview #}
+        <div class="card">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            {% trans %}DNS Status{% endtrans %}
+            <button class="btn btn-sm btn-outline-secondary" id="btn-verify-dns" data-domain="{{ site.domainName }}">
+              <span class="spinner-border spinner-border-sm d-none" id="verify-spinner"></span>
+              {% trans %}Verify DNS{% endtrans %}
+            </button>
+          </div>
+          <div class="card-body card-body-no-padding">
+            <table class="table table-dns-status">
+              <thead>
+                <tr>
+                  <th>{% trans %}Record{% endtrans %}</th>
+                  <th>{% trans %}Type{% endtrans %}</th>
+                  <th class="text-center">{% trans %}Status{% endtrans %}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>SPF</td>
+                  <td><code>{{ site.domainName }}</code></td>
+                  <td class="text-center">
+                    <span class="dns-status" id="status-spf">
+                      {% if dnsStatus.spf %}
+                        <span class="badge bg-success">{% trans %}Active{% endtrans %}</span>
+                      {% else %}
+                        <span class="badge bg-danger">{% trans %}Missing{% endtrans %}</span>
+                      {% endif %}
+                    </span>
+                  </td>
+                </tr>
+                <tr>
+                  <td>DKIM</td>
+                  <td><code>mail._domainkey.{{ site.domainName }}</code></td>
+                  <td class="text-center">
+                    <span class="dns-status" id="status-dkim">
+                      {% if dnsStatus.dkim %}
+                        <span class="badge bg-success">{% trans %}Active{% endtrans %}</span>
+                      {% else %}
+                        <span class="badge bg-danger">{% trans %}Missing{% endtrans %}</span>
+                      {% endif %}
+                    </span>
+                  </td>
+                </tr>
+                <tr>
+                  <td>DMARC</td>
+                  <td><code>_dmarc.{{ site.domainName }}</code></td>
+                  <td class="text-center">
+                    <span class="dns-status" id="status-dmarc">
+                      {% if dnsStatus.dmarc %}
+                        <span class="badge bg-success">{% trans %}Active{% endtrans %}</span>
+                      {% else %}
+                        <span class="badge bg-danger">{% trans %}Missing{% endtrans %}</span>
+                      {% endif %}
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {# DKIM Key #}
+        <div class="card">
+          <div class="card-header">
+            {% trans %}DKIM{% endtrans %}
+          </div>
+          <div class="card-body">
+            {% if dkimExists %}
+              <div class="dns-record-box">
+                <div class="dns-record-label">
+                  <strong>{% trans %}DNS TXT Record{% endtrans %}</strong>
+                  <span class="text-muted ms-2">mail._domainkey.{{ site.domainName }}</span>
+                </div>
+                <div class="dns-record-value">
+                  <code class="click-to-copy" data-bs-toggle="tooltip" data-bs-title="{% trans %}Click to Copy{% endtrans %}">{{ dkimDnsRecord }}</code>
+                </div>
+              </div>
+            {% else %}
+              <p class="text-muted">{% trans %}No DKIM key has been generated for this domain yet.{% endtrans %}</p>
+              <form method="post" action="{{ path('clp_site_mail_generate_dkim', {'domainName': site.domainName}) }}">
+                <input type="hidden" name="token" value="{{ csrf_token('generate-dkim') }}">
+                <button type="submit" class="btn btn-blue">
+                  {% trans %}Generate DKIM Key{% endtrans %}
+                </button>
+              </form>
+            {% endif %}
+          </div>
+        </div>
+
+        {# SPF Record #}
+        <div class="card">
+          <div class="card-header">
+            {% trans %}SPF{% endtrans %}
+          </div>
+          <div class="card-body">
+            <div class="dns-record-box">
+              <div class="dns-record-label">
+                <strong>{% trans %}DNS TXT Record{% endtrans %}</strong>
+                <span class="text-muted ms-2">{{ site.domainName }}</span>
+              </div>
+              <div class="dns-record-value">
+                <code class="click-to-copy" data-bs-toggle="tooltip" data-bs-title="{% trans %}Click to Copy{% endtrans %}">{{ spfRecord }}</code>
+              </div>
+            </div>
+            <div class="form-text mt-2">
+              {% trans %}Add this TXT record to the DNS settings of your domain to authorize this server to send emails.{% endtrans %}
+              {% if serverIpv4 %}
+                <br>{% trans %}Server IPv4{% endtrans %}: <code>{{ serverIpv4 }}</code>
+              {% endif %}
+              {% if serverIpv6 %}
+                | {% trans %}Server IPv6{% endtrans %}: <code>{{ serverIpv6 }}</code>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        {# DMARC Record #}
+        <div class="card">
+          <div class="card-header">
+            {% trans %}DMARC{% endtrans %}
+          </div>
+          <div class="card-body">
+            <div class="dns-record-box">
+              <div class="dns-record-label">
+                <strong>{% trans %}DNS TXT Record{% endtrans %}</strong>
+                <span class="text-muted ms-2">_dmarc.{{ site.domainName }}</span>
+              </div>
+              <div class="dns-record-value">
+                <code class="click-to-copy" data-bs-toggle="tooltip" data-bs-title="{% trans %}Click to Copy{% endtrans %}">{{ dmarcRecord }}</code>
+              </div>
+            </div>
+            <div class="form-text mt-2">
+              {% trans %}This DMARC policy tells receiving mail servers to quarantine emails that fail SPF/DKIM checks.{% endtrans %}
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block javascript %}
+  {{ parent() }}
+  <script type="text/javascript">
+  jQuery(document).ready(function() {
+    jQuery('#btn-verify-dns').on('click', function() {
+      var btn = jQuery(this);
+      var domain = btn.data('domain');
+      var spinner = jQuery('#verify-spinner');
+
+      btn.prop('disabled', true);
+      spinner.removeClass('d-none');
+
+      jQuery.getJSON("{{ path('clp_site_mail_verify_dns', {'domainName': '__DOMAIN__'}) }}".replace('__DOMAIN__', domain), function(data) {
+        var statusMap = {true: '<span class="badge bg-success">{% trans %}Active{% endtrans %}</span>', false: '<span class="badge bg-danger">{% trans %}Missing{% endtrans %}</span>'};
+        jQuery('#status-spf').html(statusMap[data.spf]);
+        jQuery('#status-dkim').html(statusMap[data.dkim]);
+        jQuery('#status-dmarc').html(statusMap[data.dmarc]);
+      }).always(function() {
+        btn.prop('disabled', false);
+        spinner.addClass('d-none');
+      });
+    });
+  });
+  </script>
+{% endblock %}

@@ -1,0 +1,328 @@
+#!/bin/bash
+set -e
+
+# CloudPanel Mail Addon - DKIM/SPF/DMARC Management
+# https://github.com/... (TODO: add repo URL)
+
+ADDON_DIR="/opt/clp-mail-addon"
+CLP_APP="/home/clp/htdocs/app/files"
+CLP_TEMPLATES="$CLP_APP/templates/Frontend/Site"
+CLP_CONTROLLERS="$CLP_APP/src/Controller/Frontend"
+CLP_CSS="$CLP_APP/public/assets/css/frontend"
+CLP_ROUTES="$CLP_APP/config/routes.yaml"
+TAB_TEMPLATE="$CLP_TEMPLATES/Partial/tab-container.html.twig"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+log_ok()   { echo -e "${GREEN}[OK]${NC} $1"; }
+log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+log_err()  { echo -e "${RED}[ERROR]${NC} $1"; }
+
+check_root() {
+    if [ "$EUID" -ne 0 ]; then
+        log_err "This script must be run as root."
+        exit 1
+    fi
+}
+
+is_patched() {
+    grep -q "clp_site_mail" "$CLP_ROUTES" 2>/dev/null && \
+    grep -q "'mail'" "$TAB_TEMPLATE" 2>/dev/null
+}
+
+patch_tab_container() {
+    if grep -q "'mail'" "$TAB_TEMPLATE" 2>/dev/null; then
+        log_ok "Tab already present in tab-container.html.twig"
+        return 0
+    fi
+
+    # Insert mail tab before closing </ul>
+    sed -i '/<\/ul>/i\    <li {% if active == '\''mail'\'' %}class="active"{% endif %}>\n      <a href="{{ path('\''clp_site_mail'\'', {'\''domainName'\'': site.domainName}) }}">{% trans %}Mail{% endtrans %}<\/a>\n    <\/li>' "$TAB_TEMPLATE"
+
+    if grep -q "'mail'" "$TAB_TEMPLATE"; then
+        log_ok "Tab added to tab-container.html.twig"
+    else
+        log_err "Failed to patch tab-container.html.twig"
+        return 1
+    fi
+}
+
+patch_routes() {
+    if grep -q "clp_site_mail:" "$CLP_ROUTES" 2>/dev/null; then
+        log_ok "Routes already present in routes.yaml"
+        return 0
+    fi
+
+    cat >> "$CLP_ROUTES" << 'ROUTES'
+
+# CloudPanel Mail Addon - DKIM/SPF/DMARC Management
+clp_site_mail:
+  path: /site/{domainName}/mail
+  controller: App\Controller\Frontend\MailController::index
+
+clp_site_mail_generate_dkim:
+  path: /site/{domainName}/mail/generate-dkim
+  controller: App\Controller\Frontend\MailController::generateDkim
+  methods: POST
+
+clp_site_mail_verify_dns:
+  path: /site/{domainName}/mail/verify-dns
+  controller: App\Controller\Frontend\MailController::verifyDns
+ROUTES
+
+    if grep -q "clp_site_mail:" "$CLP_ROUTES"; then
+        log_ok "Routes added to routes.yaml"
+    else
+        log_err "Failed to patch routes.yaml"
+        return 1
+    fi
+}
+
+copy_files() {
+    cp "$ADDON_DIR/src/Controller/Frontend/MailController.php" "$CLP_CONTROLLERS/MailController.php"
+    cp "$ADDON_DIR/templates/Frontend/Site/mail.html.twig" "$CLP_TEMPLATES/mail.html.twig"
+    cp "$ADDON_DIR/public/assets/css/frontend/mail.css" "$CLP_CSS/mail.css"
+
+    # Ensure correct ownership (CloudPanel files are owned by clp:clp)
+    chown clp:clp "$CLP_CONTROLLERS/MailController.php"
+    chown clp:clp "$CLP_TEMPLATES/mail.html.twig"
+    chown clp:clp "$CLP_CSS/mail.css"
+
+    # Match CloudPanel file permissions (750)
+    chmod 770 "$CLP_CONTROLLERS/MailController.php"
+    chmod 770 "$CLP_TEMPLATES/mail.html.twig"
+    chmod 770 "$CLP_CSS/mail.css"
+
+    log_ok "Addon files copied"
+}
+
+clear_cache() {
+    su -s /bin/bash -c "cd $CLP_APP && php bin/console cache:clear --env=prod 2>&1" clp > /dev/null
+    log_ok "Symfony cache cleared"
+}
+
+install_apt_hook() {
+    local hook_file="/etc/apt/apt.conf.d/99-clp-mail-addon"
+
+    cat > "$hook_file" << 'HOOK'
+DPkg::Post-Invoke { "if [ -x /usr/local/bin/clp-mail-addon ]; then /usr/local/bin/clp-mail-addon repair --quiet 2>/dev/null || true; fi"; };
+HOOK
+
+    log_ok "APT hook installed at $hook_file"
+}
+
+ensure_opendkim() {
+    if ! command -v opendkim-genkey &> /dev/null; then
+        log_warn "OpenDKIM not installed. Installing..."
+        apt-get install -y opendkim opendkim-tools > /dev/null 2>&1
+        log_ok "OpenDKIM installed"
+    fi
+
+    # Ensure directories exist
+    mkdir -p /etc/opendkim/keys
+    chown -R opendkim:opendkim /etc/opendkim
+    chmod 750 /etc/opendkim/keys
+
+    # Create config files if missing
+    for f in /etc/opendkim/signing.table /etc/opendkim/key.table /etc/opendkim/trusted.hosts; do
+        if [ ! -f "$f" ]; then
+            touch "$f"
+            chown opendkim:opendkim "$f"
+        fi
+    done
+
+    # Ensure socket directory exists inside postfix chroot
+    mkdir -p /var/spool/postfix/opendkim
+    chown opendkim:postfix /var/spool/postfix/opendkim
+
+    log_ok "OpenDKIM directories verified"
+}
+
+cmd_install() {
+    check_root
+    echo "Installing CloudPanel Mail Addon..."
+    echo ""
+
+    if [ ! -d "$ADDON_DIR" ]; then
+        log_err "Addon source not found at $ADDON_DIR"
+        log_err "Please clone the repository to $ADDON_DIR first."
+        exit 1
+    fi
+
+    if [ ! -d "$CLP_APP" ]; then
+        log_err "CloudPanel not found at $CLP_APP"
+        exit 1
+    fi
+
+    ensure_opendkim
+    copy_files
+    patch_tab_container
+    patch_routes
+    clear_cache
+    install_apt_hook
+
+    # Install this script to /usr/local/bin
+    cp "$ADDON_DIR/scripts/clp-mail-addon" /usr/local/bin/clp-mail-addon
+    chmod +x /usr/local/bin/clp-mail-addon
+
+    echo ""
+    log_ok "Installation complete!"
+    echo ""
+    echo "  Open CloudPanel and navigate to any site."
+    echo "  You should see a new 'Mail' tab."
+    echo ""
+}
+
+cmd_repair() {
+    local quiet=false
+    [ "$1" = "--quiet" ] && quiet=true
+
+    # Quick idempotency check - exit fast if already patched
+    if is_patched && \
+       [ -f "$CLP_CONTROLLERS/MailController.php" ] && \
+       [ -f "$CLP_TEMPLATES/mail.html.twig" ] && \
+       [ -f "$CLP_CSS/mail.css" ]; then
+        $quiet || log_ok "All patches intact, nothing to repair."
+        return 0
+    fi
+
+    $quiet || echo "Repairing CloudPanel Mail Addon..."
+
+    if [ ! -d "$ADDON_DIR" ]; then
+        $quiet || log_err "Addon source not found at $ADDON_DIR - cannot repair."
+        return 1
+    fi
+
+    copy_files
+    patch_tab_container
+    patch_routes
+    clear_cache
+
+    $quiet || log_ok "Repair complete!"
+}
+
+cmd_check() {
+    echo "Checking CloudPanel Mail Addon status..."
+    echo ""
+
+    local all_ok=true
+
+    if [ -f "$CLP_CONTROLLERS/MailController.php" ]; then
+        log_ok "MailController.php present"
+    else
+        log_err "MailController.php MISSING"
+        all_ok=false
+    fi
+
+    if [ -f "$CLP_TEMPLATES/mail.html.twig" ]; then
+        log_ok "mail.html.twig present"
+    else
+        log_err "mail.html.twig MISSING"
+        all_ok=false
+    fi
+
+    if [ -f "$CLP_CSS/mail.css" ]; then
+        log_ok "mail.css present"
+    else
+        log_err "mail.css MISSING"
+        all_ok=false
+    fi
+
+    if grep -q "clp_site_mail" "$CLP_ROUTES" 2>/dev/null; then
+        log_ok "Routes configured"
+    else
+        log_err "Routes MISSING"
+        all_ok=false
+    fi
+
+    if grep -q "'mail'" "$TAB_TEMPLATE" 2>/dev/null; then
+        log_ok "Mail tab present"
+    else
+        log_err "Mail tab MISSING"
+        all_ok=false
+    fi
+
+    if [ -f "/etc/apt/apt.conf.d/99-clp-mail-addon" ]; then
+        log_ok "APT hook installed"
+    else
+        log_warn "APT hook not installed"
+    fi
+
+    if systemctl is-active opendkim > /dev/null 2>&1; then
+        log_ok "OpenDKIM running"
+    else
+        log_err "OpenDKIM NOT running"
+        all_ok=false
+    fi
+
+    if systemctl is-active postfix > /dev/null 2>&1; then
+        log_ok "Postfix running"
+    else
+        log_err "Postfix NOT running"
+        all_ok=false
+    fi
+
+    echo ""
+    if $all_ok; then
+        log_ok "Everything looks good!"
+    else
+        log_err "Issues detected. Run 'clp-mail-addon repair' to fix."
+    fi
+}
+
+cmd_uninstall() {
+    check_root
+    echo "Uninstalling CloudPanel Mail Addon..."
+
+    # Remove addon files from CloudPanel
+    rm -f "$CLP_CONTROLLERS/MailController.php"
+    rm -f "$CLP_TEMPLATES/mail.html.twig"
+    rm -f "$CLP_CSS/mail.css"
+
+    # Remove routes (sed delete from marker to end of block)
+    sed -i '/# CloudPanel Mail Addon/,/controller: App\\Controller\\Frontend\\MailController/d' "$CLP_ROUTES"
+
+    # Remove tab from template
+    sed -i "/mail/d" "$TAB_TEMPLATE"
+
+    # Remove APT hook
+    rm -f /etc/apt/apt.conf.d/99-clp-mail-addon
+
+    # Clear cache
+    clear_cache
+
+    log_ok "Addon removed from CloudPanel."
+    log_warn "OpenDKIM configuration and DKIM keys were NOT removed."
+    log_warn "Addon source at $ADDON_DIR was NOT removed."
+    log_warn "To remove completely: rm -rf $ADDON_DIR /usr/local/bin/clp-mail-addon"
+}
+
+case "${1:-}" in
+    install)
+        cmd_install
+        ;;
+    repair)
+        cmd_repair "${2:-}"
+        ;;
+    check)
+        cmd_check
+        ;;
+    uninstall)
+        cmd_uninstall
+        ;;
+    *)
+        echo "CloudPanel Mail Addon - DKIM/SPF/DMARC Management"
+        echo ""
+        echo "Usage: clp-mail-addon <command>"
+        echo ""
+        echo "Commands:"
+        echo "  install     Install the addon into CloudPanel"
+        echo "  repair      Re-apply patches (e.g., after CloudPanel update)"
+        echo "  check       Verify addon status"
+        echo "  uninstall   Remove addon from CloudPanel"
+        echo ""
+        ;;
+esac
