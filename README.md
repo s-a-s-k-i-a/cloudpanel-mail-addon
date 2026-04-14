@@ -43,10 +43,10 @@ This addon:
 git clone https://github.com/s-a-s-k-i-a/cloudpanel-mail-addon.git /opt/clp-mail-addon
 ```
 
-Or download a specific release:
+Or install a specific release (recommended for production):
 
 ```bash
-wget -qO- https://github.com/s-a-s-k-i-a/cloudpanel-mail-addon/archive/refs/heads/main.tar.gz | tar xz -C /opt/ && mv /opt/cloudpanel-mail-addon-main /opt/clp-mail-addon
+wget -qO- https://github.com/s-a-s-k-i-a/cloudpanel-mail-addon/archive/refs/tags/v1.0.0.tar.gz | tar xz -C /opt/ && mv /opt/cloudpanel-mail-addon-1.0.0 /opt/clp-mail-addon
 ```
 
 ### 2. Run the installer
