@@ -20,14 +20,16 @@ This addon:
 - **Generates 2048-bit DKIM keys** per domain with one click
 - Displays **copy-ready DNS records** (DKIM TXT, SPF TXT, DMARC TXT) that you paste into your domain's DNS settings
 - **Verifies DNS propagation** with a live check button -- green badge when records are active, red when missing
-- Automatically configures **OpenDKIM** and **Postfix** so all outbound mail from your server is DKIM-signed
+- Configures **OpenDKIM** to sign all outbound mail with DKIM
 - **Survives CloudPanel updates** via an APT hook that re-applies patches automatically
+
+> **Note:** This addon does not install a mail server. CloudPanel already ships with Postfix (via its `bsd-mailx` dependency). This addon builds on top of that existing Postfix installation by adding OpenDKIM for email authentication. If your server uses a different MTA (sendmail, exim, etc.), the OpenDKIM integration may need manual adjustment.
 
 ---
 
 ## Requirements
 
-- **CloudPanel v2.5+** on Ubuntu 24.04 or 22.04
+- **CloudPanel v2.5+** on Ubuntu 24.04 or 22.04 (Postfix is included by default)
 - **Root access** to the server
 - A domain with DNS access (to add the generated TXT records)
 
@@ -54,7 +56,8 @@ wget -qO- https://github.com/s-a-s-k-i-a/cloudpanel-mail-addon/archive/refs/head
 ```
 
 This will:
-- Install OpenDKIM if not already present
+- Install **OpenDKIM** and configure it to work with the existing Postfix installation (no new mail server is installed)
+- Connect OpenDKIM to Postfix via milter socket
 - Copy the addon files into CloudPanel
 - Add the "Mail" tab to the site navigation
 - Register the necessary routes
@@ -196,9 +199,30 @@ If missing: `apt install opendkim opendkim-tools`
 
 ---
 
+## Background & Motivation
+
+CloudPanel deliberately does not include email features -- and that is a reasonable design decision to keep the panel lightweight. However, many CloudPanel users host WordPress sites, contact forms, or web applications that need to send transactional emails reliably. Without DKIM, SPF, and DMARC, those emails frequently land in spam.
+
+This addon was born out of that exact need: a real-world hosting setup for [Tierheim Hannover](https://www.tierheim-hannover.de/) where outbound email authentication was required but no CloudPanel-native solution existed.
+
+### Related CloudPanel Discussions
+
+This addon addresses several long-standing requests in the CloudPanel community:
+
+- [E-mail server support](https://github.com/cloudpanel-io/cloudpanel-ce/discussions/109) -- CloudPanel's official stance: "No email planned." This addon respects that by not adding a mail server, only outbound authentication.
+- [SMTP relay service for emails](https://github.com/cloudpanel-io/cloudpanel-ce/discussions/211) -- Request for SMTP relay integration. This addon works alongside any relay setup.
+- [Developer extensions](https://github.com/cloudpanel-io/cloudpanel-ce/discussions/465) -- Request for a plugin/extension system. This addon demonstrates that CloudPanel's Symfony architecture can be extended with self-repairing addons.
+- [Add Setup Mail Server SPF and DKIM](https://feature-requests.cloudpanel.io/posts/257/add-setup-mail-server-spf-and-dkim) -- The exact feature request this addon fulfills.
+- [Reconsider integration with Email Server](https://feature-requests.cloudpanel.io/posts/437/reconsider-integration-with-email-server) -- Users asking CloudPanel to reconsider. This addon offers a community-driven alternative.
+- [Plugins/Addons ability](https://feature-requests.cloudpanel.io/posts/66/plugins-addons-ability) -- 26+ votes for a plugin system. This addon is a working proof of concept.
+
+---
+
 ## Contributing
 
 Contributions are welcome. Please open an issue before submitting large changes.
+
+If you find this addon useful, consider sharing it in the discussions linked above -- the more CloudPanel users know about it, the better.
 
 ---
 
